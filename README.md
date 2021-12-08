@@ -3,6 +3,8 @@
 Transformer OCR is a Optical Character Recognition tookit built for researchers working on both OCR for both Vietnamese and English.
 This project only focused on variants of vanilla Transformer and Feature Extraction (CNN-based approach).
 
+This is also the first repo to utilize ConformerNet (https://arxiv.org/abs/2005.08100) for OCR.
+
 ## Key Features
 
 ## Install dependencies
