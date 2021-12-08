@@ -1,0 +1,23 @@
+pl_trainer:
+  gpus: 2 # number of gpus
+  max_epochs: 200
+  max_steps: 100000 # computed at runtime if not set
+  num_nodes: 1
+  accelerator: dp
+  accumulate_grad_batches: 1
+  checkpoint_callback: true
+  log_every_n_steps: 10  # Interval of logging
+  val_every_n_steps: 500  # Interval of logging
+  val_check_interval: 0.5 # Set to 0.25 to check 4 times per epoch, or an int for number of iterations
+  detect_anomaly: true
+  check_val_every_n_epoch: 1
+  precision: 32
+  sync_batchnorm: false
+  benchmark: false
+
+model_callbacks:
+  monitor: sentence accuracy
+  dirpath: ckpts
+  filename: dmec-{iter:02d}-{sentence accuracy:.2f}
+  save_top_k: 3
+  mode: max

@@ -1,0 +1,9 @@
+torch
+omegaconf
+hydra-core
+einops
+numpy
+matplotlib
+imgaug>=0.4.0
+tqdm
+Pillow

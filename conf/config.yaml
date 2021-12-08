@@ -1,0 +1,5 @@
+defaults:
+  - dataset: dmec
+  - model: vgg_conformer
+  - optimizer: adam
+  - pl_params: pl_params

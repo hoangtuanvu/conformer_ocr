@@ -1,0 +1,47 @@
+# change to list chars of your dataset or use default vietnamese chars
+vocab: 'aAàÀảẢãÃáÁạẠăĂằẰẳẲẵẴắẮặẶâÂầẦẩẨẫẪấẤậẬbBcCdDđĐeEèÈẻẺẽẼéÉẹẸêÊềỀểỂễỄếẾệỆfFgGhHiIìÌỉỈĩĨíÍịỊjJkKlLmMnNoOòÒỏỎõÕóÓọỌôÔồỒổỔỗỖốỐộỘơƠờỜởỞỡỠớỚợỢpPqQrRsStTuUùÙủỦũŨúÚụỤưƯừỪửỬữỮứỨựỰvVwWxXyYỳỲỷỶỹỸýÝỵỴzZ0123456789!"#$%&''()*+,-./:;<=>?@[\]^_`{|}~ '
+
+# cpu, cuda, cuda:0
+device: cuda:0
+batch_size: 256
+
+cnn_model: vgg19_bn
+cnn_args:
+    pretrained: True
+    # pooling stride size
+    stride_pool:
+        - [2, 2]
+        - [2, 2]
+        - [2, 1]
+        - [2, 1]
+        - [1, 1]
+    # pooling kernel size
+    kernel_pool:
+        - [2, 2]
+        - [2, 2]
+        - [2, 1]
+        - [2, 1]
+        - [1, 1]
+    # dim of ouput feature map
+    hidden: 384
+    dropout: 0.5
+
+transformer_type: conformer
+transformer_args:
+    max_seq_length: 1024
+    n_layers: 2
+    scale: True
+    d_model: 384
+    n_head: 4
+    d_feedforward: 1536
+    emb_dropout: 0.0
+    pos_dropout: 0.1
+    ff_dropout: 0.1
+    conv_dropout: 0.1
+    attn_dropout: 0.1
+    activation: swish
+    layer_norm_eps: 1e-5
+    self_attn_type: abs_pos
+    half_step_residual: True
+    conv_kernel_size: 3
+    conv_expansion_factor: 2

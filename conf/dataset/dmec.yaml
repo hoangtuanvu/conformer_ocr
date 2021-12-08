@@ -1,0 +1,21 @@
+dataset:
+    # name of your dataset
+    name: v6
+    train_annotation: label_ocr_v5_2_train.txt
+    valid_annotation: label_ocr_v5_2_test.txt
+    # path to annotation and image
+    unchanged:
+        root_dir: /u01/vuh/datasets/OCR
+        # resize image to 32 height, larger height will increase accuracy
+        img_height: 32
+        img_width_min: 32
+        img_width_max: 1024
+        max_readers: 16
+
+dataloader:
+    num_workers: 3
+    pin_memory: True
+
+aug:
+    image_aug: true
+    masked_language_model: false
