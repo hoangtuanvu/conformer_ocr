@@ -1,8 +1,6 @@
 import torch
 from torch import nn
-from torchvision.models import vgg
-# from timm.models import vgg
-from transformer_ocr.core.activations import Swish
+from timm.models import vgg
 
 
 class Vgg(nn.Module):
