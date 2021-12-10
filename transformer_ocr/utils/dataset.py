@@ -6,12 +6,13 @@ import lmdb
 import logging
 import six
 from tqdm import tqdm
-import torch
 from PIL import Image
 from PIL import ImageFile
 from collections import defaultdict
+import torch
 from torch.utils.data import Dataset
 from torch.utils.data.sampler import Sampler
+
 ImageFile.LOAD_TRUNCATED_IMAGES = True
 
 from transformer_ocr.utils.image_processing import resize_img, get_new_width
@@ -32,6 +33,7 @@ class OCRDataset(Dataset):
         transform ():
         max_readers (int):
     """
+
     def __init__(self, saved_path,
                  root_dir,
                  gt_path,
@@ -78,7 +80,7 @@ class OCRDataset(Dataset):
             meminit=False)
         self.txn = self.env.begin(write=False)
 
-        dataset_size = int(self.txn.get('dataset_size'.encode()))
+        dataset_size = int(self.txn.get('num-samples'.encode()))
         self.dataset_size = dataset_size
 
         self.clusters = self.build_clusters_by_img_width()
@@ -194,7 +196,7 @@ class OCRDataset(Dataset):
                 cache = {}
 
         dataset_size = cnt - 1
-        cache['dataset_size'] = str(dataset_size).encode()
+        cache['num-samples'] = str(dataset_size).encode()
         self.write_cache(env, cache)
 
         if error > 0:
@@ -208,7 +210,7 @@ class OCRDataset(Dataset):
 
         img_path = os.path.join(self.root_dir, img_path)
 
-        sample = {'img': img, 'word': sentence, 'img_path': img_path}
+        sample = {'img': img, 'sentence': sentence, 'img_path': img_path}
 
         return sample
 
@@ -241,14 +243,19 @@ class OCRDataset(Dataset):
 
 
 class ClusterRandomSampler(Sampler):
-    """TODO
+    """Takes a dataset with cluster_indices property, cuts it into batch-sized chunks
+    Drops the extra items, not fitting into exact batches
 
     Args:
-        data_source:
-        batch_size:
-        shuffle:
+        data_source (Dataset): a Dataset to sample from. Should have a cluster_indices property
+        batch_size (int): a batch size that you would like to use later with Dataloader class
+        shuffle (bool): whether to shuffle the data or not
+
+    This is implemented by repo: https://github.com/snakers4/mnasnet-pytorch
     """
     def __init__(self, data_source, batch_size, shuffle=True):
+        super(ClusterRandomSampler, self).__init__()
+
         self.data_source = data_source
         self.batch_size = batch_size
         self.shuffle = shuffle
@@ -286,55 +293,31 @@ class ClusterRandomSampler(Sampler):
 
 
 class Collator(object):
-    def __init__(self, masked_language_model=True):
-        self.masked_language_model = masked_language_model
-
     def __call__(self, batch):
-        filenames = []
+        img_path = []
         img = []
-        target_weights = []
         tgt_input = []
-        max_label_len = max(len(sample['word']) for sample in batch)
+        max_label_len = max(len(sample['sentence']) for sample in batch)
 
         for sample in batch:
             img.append(sample['img'])
-            filenames.append(sample['img_path'])
-            label = sample['word']
+            img_path.append(sample['img_path'])
+            sentence = sample['sentence']
 
-            label_len = len(label)
-
+            sentence_len = len(sentence)
             tgt = np.concatenate((
-                label,
-                np.zeros(max_label_len - label_len, dtype=np.int32)))
+                sentence,
+                np.zeros(max_label_len - sentence_len, dtype=np.int32)))
             tgt_input.append(tgt)
-
-            one_mask_len = label_len - 1
-
-            target_weights.append(np.concatenate((
-                np.ones(one_mask_len, dtype=np.float32),
-                np.zeros(max_label_len - one_mask_len, dtype=np.float32))))
 
         img = np.array(img, dtype=np.float32)
         tgt_input = np.array(tgt_input, dtype=np.int64).T
 
-        # random mask token
-        if self.masked_language_model:
-            mask = np.random.random(size=tgt_input.shape) < 0.05
-            mask = mask & (tgt_input != 0) & (tgt_input != 1) & (tgt_input != 2)
-            tgt_input[mask] = 3
-
-        tgt_padding_mask = np.array(target_weights) == 0
-
         rs = {
             'img': torch.FloatTensor(img),
-            'tgt_input': torch.LongTensor(tgt_input),
             'tgt_output': torch.LongTensor(tgt_input.T),
-            'tgt_padding_mask': torch.BoolTensor(tgt_padding_mask),
-            'filenames': filenames
+            'img_path': img_path
         }
 
         return rs
-
-
-
 
