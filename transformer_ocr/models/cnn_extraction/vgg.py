@@ -4,16 +4,23 @@ from timm.models import vgg
 
 
 class Vgg(nn.Module):
-    """
+    """ Use variants of VGG-style as a backbone to extract feature from input images. Utilized VGG-networks from
+    Timm repo.
+
     Args:
-        name (str):
-        stride_pool (list):
-        kernel_pool (list):
-        d_model (int):
-        pretrained (bool):
-        dropout_p (float):
+        name (str): name of pretrained models. For example, vgg11_bn, vgg19_bn, ...
+        stride_pool (list): Change kernel_size of MaxPool2d in VGG net to keep more spatial information
+        kernel_pool (list): Change stride of MaxPool2d in VGG net to keep more spatial information
+        d_model (int): output dimension to feed Transformer model
+        pretrained (bool): Whether load pretrained model or not
+        dropout_p (float): dropout after extracted feature from CNN backbone
     """
-    def __init__(self, name, stride_pool, kernel_pool, d_model, pretrained=True, dropout_p=0.5):
+    def __init__(self, name: str,
+                 stride_pool: list,
+                 kernel_pool: list,
+                 d_model: int,
+                 pretrained: bool,
+                 dropout_p: float):
         super(Vgg, self).__init__()
 
         assert name in ['vgg11_bn', 'vgg19_bn'], "{} does not in the pre-defined list".format(name)
@@ -31,8 +38,6 @@ class Vgg(nn.Module):
                                                      stride=list(stride_pool[pool_idx]),
                                                      padding=0)
                 pool_idx += 1
-            # elif isinstance(layer, torch.nn.ReLU):
-            #     net.features[i] = Swish()
 
         self.features = net.features
         self.dropout = nn.Dropout(dropout_p)
@@ -40,7 +45,7 @@ class Vgg(nn.Module):
                                 out_channels=d_model,
                                 kernel_size=1)
 
-    def forward(self, x):
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
         """
         Shape:
             - x: (n, C, H, W)
@@ -56,22 +61,27 @@ class Vgg(nn.Module):
         return conv
 
 
-def vgg11_bn(stride_pool, kernel_pool, hidden, pretrained=True, dropout=0.5):
+def vgg11_bn(stride_pool, kernel_pool, hidden, pretrained, dropout):
     return Vgg('vgg11_bn', stride_pool, kernel_pool, hidden, pretrained, dropout)
 
 
-def vgg19_bn(stride_pool, kernel_pool, hidden, pretrained=True, dropout=0.5):
+def vgg19_bn(stride_pool, kernel_pool, hidden, pretrained, dropout):
     return Vgg('vgg19_bn', stride_pool, kernel_pool, hidden, pretrained, dropout)
 
 
-if __name__ == "__main__":
-    x = torch.rand((2, 3, 16, 32))
+def test():
+    x = torch.rand((2, 3, 32, 80))
     model = Vgg('vgg19_bn',
                 stride_pool=[[2, 2], [2, 2], [2, 1], [2, 1], [1, 1]],
                 kernel_pool=[[2, 2], [2, 2], [2, 1], [2, 1], [1, 1]],
-                d_model = 144,
-                pretrained=True)
+                d_model=144,
+                pretrained=True,
+                dropout_p=0.1)
     print(model)
     out = model(x)
     print(out.size())
+
+
+if __name__ == "__main__":
+    test()
 
