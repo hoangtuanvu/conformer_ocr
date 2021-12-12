@@ -195,6 +195,10 @@ class OCRDataset(Dataset):
                 self.write_cache(env, cache)
                 cache = {}
 
+        if cnt % 1000 != 0:
+            self.write_cache(env, cache)
+            cache = {}
+
         dataset_size = cnt - 1
         cache['num-samples'] = str(dataset_size).encode()
         self.write_cache(env, cache)
@@ -254,8 +258,6 @@ class ClusterRandomSampler(Sampler):
     This is implemented by repo: https://github.com/snakers4/mnasnet-pytorch
     """
     def __init__(self, data_source, batch_size, shuffle=True):
-        super(ClusterRandomSampler, self).__init__()
-
         self.data_source = data_source
         self.batch_size = batch_size
         self.shuffle = shuffle
