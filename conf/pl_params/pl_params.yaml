@@ -14,6 +14,16 @@ pl_trainer:
   precision: 32
   sync_batchnorm: false
   benchmark: false
+  gradient_clip_val: 1.0
+  gradient_clip_algorithm: value
+
+loss_func:
+  blank: 1
+  reduction: sum
+  zero_infinity: true
+
+ctc_smoothing: 0.1
+max_norm: 5.0
 
 model_callbacks:
   monitor: sentence accuracy
