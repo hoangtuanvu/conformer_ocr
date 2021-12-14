@@ -6,6 +6,9 @@ This project only focused on variants of vanilla Transformer and Feature Extract
 This is also the first repo to utilize ConformerNet (https://arxiv.org/abs/2005.08100) for OCR.
 
 ## Key Features
+- Variants of Transformer (e.g., Vanilla, Conformer) encoder with CTC decoder.
+- Both naive Pytorch and Pytorch Lightning are provided
+- Beam search with N-gram Language model
 
 ## Install dependencies
 ```
@@ -28,13 +31,19 @@ To modulize the repo, the current structure is adopted as follows:
 │   ├── train.py
 │   └── train_PT.py
 ├── transformer_ocr # Main resource
-├── README.md
-└── run_CXR.py # main file will be store here 
+└── README.md 
 ```
 
 ## Tutorials
 
 ## Quick start
+Train with naive Pytorch mode
+```
+cd scripts
+python train.py
+```
+
+Train with Pytorch Lightning mode
 ```
 cd scripts
 python train_PT.py
