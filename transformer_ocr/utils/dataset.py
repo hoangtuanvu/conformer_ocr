@@ -12,10 +12,12 @@ from collections import defaultdict
 import torch
 from torch.utils.data import Dataset
 from torch.utils.data.sampler import Sampler
+from torch.utils.data import DataLoader
 
 ImageFile.LOAD_TRUNCATED_IMAGES = True
 
-from transformer_ocr.utils.image_processing import resize_img, get_new_width
+from transformer_ocr.utils.vocab import VocabBuilder
+from transformer_ocr.utils.image_processing import resize_img, get_new_width, NormalizePAD, ResizeNormalize
 
 
 class OCRDataset(Dataset):
@@ -255,7 +257,7 @@ class ClusterRandomSampler(Sampler):
         batch_size (int): a batch size that you would like to use later with Dataloader class
         shuffle (bool): whether to shuffle the data or not
 
-    This is implemented by repo: https://github.com/snakers4/mnasnet-pytorch
+    This is customized from repo: https://github.com/snakers4/mnasnet-pytorch
     """
     def __init__(self, data_source, batch_size, shuffle=True):
         self.data_source = data_source
@@ -263,17 +265,29 @@ class ClusterRandomSampler(Sampler):
         self.shuffle = shuffle
 
         batch_lists = []
+        ignored_batch_lst = []
+
         for cluster, cluster_indices in self.data_source.clusters.items():
             if self.shuffle:
                 random.shuffle(cluster_indices)
 
             batches = [cluster_indices[i:i + self.batch_size] for i in range(0, len(cluster_indices), self.batch_size)]
-            batches = [_ for _ in batches if len(_) == self.batch_size]
+            _batches = [_ for _ in batches if len(_) == self.batch_size]
+            ignore_batches = [_ for _ in batches if len(_) < self.batch_size]
+
             if self.shuffle:
-                random.shuffle(batches)
+                random.shuffle(_batches)
 
-            batch_lists.append(batches)
+            batch_lists.append(_batches)
 
+            if len(ignore_batches) > 0:
+                ignored_batch_lst.extend(ignore_batches[0])
+
+            if len(ignored_batch_lst) >= self.batch_size:
+                batch_lists.append([ignored_batch_lst[:self.batch_size]])
+                ignored_batch_lst = ignored_batch_lst[self.batch_size:]
+
+        batch_lists.append([ignored_batch_lst])
         lst = self.flatten_list(batch_lists)
         if self.shuffle:
             random.shuffle(lst)
@@ -295,14 +309,29 @@ class ClusterRandomSampler(Sampler):
 
 
 class Collator(object):
+    def __init__(self, img_h: int = 32, img_w: int = 512, keep_ratio_with_pad: bool = True):
+        self.img_h = img_h
+        self.img_w = img_w
+        self.keep_ratio_with_pad = keep_ratio_with_pad
+
     def __call__(self, batch):
         img_path = []
-        img = []
         tgt_input = []
         max_label_len = max(len(sample['sentence']) for sample in batch)
+        resized_max_w = max(sample['img'].size[0] for sample in batch)
+
+        if self.keep_ratio_with_pad:  # same concept with 'Rosetta' paper
+            input_channel = 3 if batch[0]['img'].mode == 'RGB' else 1
+            transform = NormalizePAD((input_channel, self.img_h, resized_max_w))
+            resized_images = [transform(sample['img']) for sample in batch]
+            image_tensors = torch.cat([t.unsqueeze(0) for t in resized_images], 0)
+
+        else:
+            transform = ResizeNormalize((self.img_w, self.img_h))
+            image_tensors = [transform(sample['img']) for sample in batch]
+            image_tensors = torch.cat([t.unsqueeze(0) for t in image_tensors], 0)
 
         for sample in batch:
-            img.append(sample['img'])
             img_path.append(sample['img_path'])
             sentence = sample['sentence']
 
@@ -312,14 +341,53 @@ class Collator(object):
                 np.zeros(max_label_len - sentence_len, dtype=np.int32)))
             tgt_input.append(tgt)
 
-        img = np.array(img, dtype=np.float32)
         tgt_input = np.array(tgt_input, dtype=np.int64).T
 
         rs = {
-            'img': torch.FloatTensor(img),
+            'img': image_tensors,
             'tgt_output': torch.LongTensor(tgt_input.T),
             'img_path': img_path
         }
 
         return rs
 
+
+def test():
+    vocab = ['a', 'A', 'à', 'À', 'ả', 'Ả', 'ã', 'Ã', 'á', 'Á', 'ạ', 'Ạ', 'ă', 'Ă', 'ằ', 'Ằ', 'ẳ', 'Ẳ', 'ẵ', 'Ẵ', 'ắ', 'Ắ', 'ặ', 'Ặ', 'â', 'Â', 'ầ', 'Ầ', 'ẩ', 'Ẩ', 'ẫ', 'Ẫ', 'ấ', 'Ấ', 'ậ', 'Ậ', 'b', 'B', 'c', 'C', 'd', 'D', 'đ', 'Đ', 'e', 'E', 'è', 'È', 'ẻ', 'Ẻ', 'ẽ', 'Ẽ', 'é', 'É', 'ẹ', 'Ẹ', 'ê', 'Ê', 'ề', 'Ề', 'ể', 'Ể', 'ễ', 'Ễ', 'ế', 'Ế', 'ệ', 'Ệ', 'f', 'F', 'g', 'G', 'h', 'H', 'i', 'I', 'ì', 'Ì', 'ỉ', 'Ỉ', 'ĩ', 'Ĩ', 'í', 'Í', 'ị', 'Ị', 'j', 'J', 'k', 'K', 'l', 'L', 'm', 'M', 'n', 'N', 'o', 'O', 'ò', 'Ò', 'ỏ', 'Ỏ', 'õ', 'Õ', 'ó', 'Ó', 'ọ', 'Ọ', 'ô', 'Ô', 'ồ', 'Ồ', 'ổ', 'Ổ', 'ỗ', 'Ỗ', 'ố', 'Ố', 'ộ', 'Ộ', 'ơ', 'Ơ', 'ờ', 'Ờ', 'ở', 'Ở', 'ỡ', 'Ỡ', 'ớ', 'Ớ', 'ợ', 'Ợ', 'p', 'P', 'q', 'Q', 'r', 'R', 's', 'S', 't', 'T', 'u', 'U', 'ù', 'Ù', 'ủ', 'Ủ', 'ũ', 'Ũ', 'ú', 'Ú', 'ụ', 'Ụ', 'ư', 'Ư', 'ừ', 'Ừ', 'ử', 'Ử', 'ữ', 'Ữ', 'ứ', 'Ứ', 'ự', 'Ự', 'v', 'V', 'w', 'W', 'x', 'X', 'y', 'Y', 'ỳ', 'Ỳ', 'ỷ', 'Ỷ', 'ỹ', 'Ỹ', 'ý', 'Ý', 'ỵ', 'Ỵ', 'z', 'Z', '0', '1', '2', '3', '4', '5', '6', '7', '8', '9', '!', '"', '#', '$', '%', '&', "'", '(', ')', '*', '+', ',', '-', '.', '/', ':', ';', '<', '=', '>', '?', '@', '[', '\\', ']', '^', '_', '`', '{', '|', '}', '~', ' ']
+
+    vocab_builder = VocabBuilder(''.join(vocab))
+    dataset_ = OCRDataset(saved_path='test',
+                          root_dir='../../data',
+                          gt_path='label_ocr_v5_2_test.txt',
+                          vocab_builder=vocab_builder,
+                          img_height=32,
+                          img_width_max=512,
+                          img_width_min=32,
+                          transform=None,
+                          max_readers=8)
+
+    print(len(dataset_))
+
+    # print(dataset_.clusters)
+    #
+    # keys = []
+    # values = []
+    # for key in dataset_.clusters.keys():
+    #     keys.append(key)
+    #     values.append(len(dataset_.clusters[key]))
+    #
+    # plt.bar(keys, values)
+    # plt.show()
+
+    _dataloader = DataLoader(
+                dataset_,
+                batch_size=32,
+                sampler=ClusterRandomSampler(dataset_, 32),
+                collate_fn=Collator(),
+                shuffle=False,
+                drop_last=True)
+
+    print(len(_dataloader))
+
+    for i, batch in enumerate(_dataloader):
+        print(i, batch['img'].size())
