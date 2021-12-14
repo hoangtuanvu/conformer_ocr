@@ -1,5 +1,6 @@
+import torch
 import math
-import numpy as np
+import torchvision.transforms as transforms
 from PIL import Image
 
 
@@ -24,7 +25,39 @@ def resize_img(image, image_height, image_min_width, image_max_width):
     new_w = get_new_width(old_w, old_h, image_height, image_min_width, image_max_width)
     new_im = img.resize((new_w, image_height), Image.BICUBIC)
 
-    new_im = np.asarray(new_im, dtype=np.float32).transpose(2, 0, 1)
-    new_im = new_im / 255
     return new_im
 
+
+class NormalizePAD(object):
+    """TODO
+    """
+    def __init__(self, max_size):
+        self.toTensor = transforms.ToTensor()
+        self.max_size = max_size
+        self.max_width_half = math.floor(max_size[2] / 2)
+
+    def __call__(self, img):
+        img = self.toTensor(img)
+        img = img / 255
+        c, h, w = img.size()
+        Pad_img = torch.FloatTensor(*self.max_size).fill_(0)
+        Pad_img[:, :, :w] = img  # right pad
+        if self.max_size[2] != w:  # add border Pad
+            Pad_img[:, :, w:] = img[:, :, w - 1].unsqueeze(2).expand(c, h, self.max_size[2] - w)
+
+        return Pad_img
+
+
+class ResizeNormalize(object):
+    """TODO
+    """
+    def __init__(self, size, interpolation=Image.BICUBIC):
+        self.size = size
+        self.interpolation = interpolation
+        self.toTensor = transforms.ToTensor()
+
+    def __call__(self, img):
+        img = img.resize(self.size, self.interpolation)
+        img = self.toTensor(img)
+        img.sub_(0.5).div_(0.5)
+        return img
