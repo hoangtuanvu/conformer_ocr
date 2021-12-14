@@ -80,6 +80,13 @@ class TransformerOCRCTC:
 
         self.criterion = nn.CTCLoss(**self.config.pl_params.loss_func)
 
+        if self.config.pl_params.pretrained:
+            if not os.path.exists(self.config.pl_params.pretrained):
+                logging.error('{} not exists. Please verify this!'.format(self.config.pl_params.pretrained))
+                exit(0)
+
+            self.load_weights(self.config.pl_params.pretrained)
+
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         return self.model(x)
 
@@ -104,7 +111,7 @@ class TransformerOCRCTC:
         loss = loss / self.config.pl_params.pl_trainer.accumulate_grad_batches
 
         loss.backward()
-        torch.nn.utils.clip_grad_norm_(self.model.parameters(), self.config.pl_params.ctc_smoothing.max_norm)
+        torch.nn.utils.clip_grad_norm_(self.model.parameters(), self.config.pl_params.max_norm)
 
         if (step + 1) % self.config.pl_params.pl_trainer.accumulate_grad_batches == 0:
             self.optimizer.step_and_update_lr()
@@ -212,8 +219,8 @@ class TransformerOCRCTC:
         logits = self.model(img)
         logits = F.log_softmax(logits, dim=2)
         outputs = logits.transpose(0, 1)
-        length = torch.tensor([tgt_output.size(1)] * self.batch_size, device=outputs.device).long()
-        preds_size = torch.tensor([outputs.size(0)] * self.batch_size, device=outputs.device).long()
+        length = torch.tensor([tgt_output.size(1)] * outputs.size(1), device=outputs.device).long()
+        preds_size = torch.tensor([outputs.size(0)] * outputs.size(1), device=outputs.device).long()
         loss = self.criterion(outputs, tgt_output, preds_size, length) / outputs.size(1)
 
         return {
@@ -231,7 +238,7 @@ class TransformerOCRCTC:
 
     def train_dataloader(self) -> DataLoader:
         _dataloader = self._prepare_data('train_{}'.format(self.config.dataset.dataset.name),
-                                         self.config.dataset.dataset.train_annotation)
+                                         self.config.dataset.dataset.train_annotation, True)
 
         return _dataloader
 
@@ -305,3 +312,26 @@ class TransformerOCRCTC:
         loss_mean = sum([loss[b, :ylens[b], :].sum() for b in range(bs)]) / ylens.sum()
 
         return loss_mean
+
+    def load_weights(self, filename):
+        state_dict = torch.load(filename, map_location=torch.device('cuda:0'))
+
+        # Multi-gpus
+        new_state_dict = {}
+        for name, param in state_dict.items():
+            if name.startswith('module'):
+                name = name[:7]
+
+            new_state_dict[name] = param
+
+        for name, param in self.model.named_parameters():
+            if name not in new_state_dict:
+                logging.warning('{} not found'.format(name))
+            elif new_state_dict[name].shape != param.shape:
+                logging.warning(
+                    '{} miss-matching shape, required {} but found {}'.format(name, param.shape,
+                                                                              new_state_dict[name].shape))
+                del new_state_dict[name]
+
+        self.model.load_state_dict(new_state_dict, strict=False)
+
