@@ -9,6 +9,7 @@ This is also the first repo to utilize ConformerNet (https://arxiv.org/abs/2005.
 - Variants of Transformer (e.g., Vanilla, Conformer) encoder with CTC decoder.
 - Both naive Pytorch and Pytorch Lightning are provided
 - Beam search with N-gram Language model
+- Accumulation gradient training
 
 ## Install dependencies
 ```
