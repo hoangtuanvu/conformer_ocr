@@ -10,6 +10,7 @@ from PIL import Image
 from PIL import ImageFile
 from collections import defaultdict
 import torch
+import collections
 from torch.utils.data import Dataset
 from torch.utils.data.sampler import Sampler
 from torch.utils.data import DataLoader
@@ -85,7 +86,8 @@ class OCRDataset(Dataset):
         dataset_size = int(self.txn.get('num-samples'.encode()))
         self.dataset_size = dataset_size
 
-        self.clusters = self.build_clusters_by_img_width()
+        clusters = self.build_clusters_by_img_width()
+        self.clusters = collections.OrderedDict(sorted(clusters.items()))
 
     def build_clusters_by_img_width(self) -> defaultdict:
         clusters = defaultdict(list)
@@ -391,3 +393,10 @@ def test():
 
     for i, batch in enumerate(_dataloader):
         print(i, batch['img'].size())
+
+
+if __name__ == "__main__":
+    a = {-1: [1,1,1], 2: [2,2], -5:[2,-1,100,1111]}
+    a = collections.OrderedDict(sorted(a.items()))
+    for key, val in a.items():
+        print(key, val)

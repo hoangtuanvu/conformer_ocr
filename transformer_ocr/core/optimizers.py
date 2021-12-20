@@ -1,4 +1,3 @@
-import torch.nn as nn
 import torch.optim as optim
 
 
@@ -43,4 +42,19 @@ class NaiveScheduler:
         for param_group in self._optimizer.param_groups:
             param_group['lr'] = lr
 
+
+def test():
+    lr_mul = 5.0
+    steps = 200000
+    d_model = 256
+    n_warmup_steps = 4000
+    for i in range(1, steps):
+        lr = lr_mul * (d_model ** -0.5) * min(i ** (-0.5), i * n_warmup_steps ** (-1.5))
+
+        if i % 10 == 0:
+            print(i, lr)
+
+
+if __name__ == "__main__":
+    test()
 
