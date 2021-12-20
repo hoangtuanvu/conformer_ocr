@@ -9,6 +9,7 @@ import torch.nn.functional as F
 from torch.utils.data import DataLoader
 from omegaconf import DictConfig
 import logging
+from ctcdecode import CTCBeamDecoder
 
 from transformer_ocr.utils.vocab import VocabBuilder
 from transformer_ocr.utils.dataset import OCRDataset, ClusterRandomSampler, Collator
@@ -80,6 +81,11 @@ class TransformerOCRCTC:
 
         self.criterion = nn.CTCLoss(**self.config.pl_params.loss_func)
 
+        self.ctc_decoder = CTCBeamDecoder(
+            self.vocab.get_vocab_tokens(),
+            **self.config.lm_models
+        )
+
         if self.config.pl_params.pretrained:
             if not os.path.exists(self.config.pl_params.pretrained):
                 logging.error('{} not exists. Please verify this!'.format(self.config.pl_params.pretrained))
@@ -91,14 +97,14 @@ class TransformerOCRCTC:
         return self.model(x)
 
     def training_step(self, batch, step):
-        img = batch['img']
-        tgt_output = batch['tgt_output']
+        img = batch['img'].cuda(non_blocking=True)
+        tgt_output = batch['tgt_output'].cuda(non_blocking=True)
 
         outputs = self.model(img)
         outputs = F.log_softmax(outputs, dim=2)
         outputs = outputs.transpose(0, 1).requires_grad_()
-        length = torch.tensor([tgt_output.size(1)] * self.batch_size, device=outputs.device).long()
-        preds_size = torch.tensor([outputs.size(0)] * self.batch_size, device=outputs.device).long()
+        length = torch.tensor([tgt_output.size(1)] * outputs.size(1), device=outputs.device).long()
+        preds_size = torch.tensor([outputs.size(0)] * outputs.size(1), device=outputs.device).long()
 
         loss = self.criterion(outputs, tgt_output, preds_size, length) / outputs.size(1)
 
@@ -165,16 +171,6 @@ class TransformerOCRCTC:
             if start_step % self.config.pl_params.pl_trainer.val_every_n_steps == 0:
                 val_info = self.validation()
 
-                info = 'iter: {:06d} - valid loss: {:.3f} - acc full seq: {:.4f} - acc per char: {:.4f} - ' \
-                       'normalized-ed: {:.4f}'.format(
-                    start_step,
-                    val_info['loss'],
-                    val_info['sentence accuracy'],
-                    val_info['character accuracy'],
-                    val_info['normalized edit distance'])
-
-                logging.info(info)
-
                 if val_info['sentence accuracy'] > best_acc:
                     saved_ckpt = os.path.join(self.config.pl_params.model_callbacks.dirpath,
                                               self.config.pl_params.model_callbacks.filename)
@@ -192,9 +188,18 @@ class TransformerOCRCTC:
                 valid_dict = self.validation_step(batch=batch)
 
                 losses = np.append(losses, valid_dict['loss'].cpu().detach().numpy())
-                logits = valid_dict['logits'].cpu().detach().numpy()
-                pred_sents.extend([self._greedy_decode(logits[i]) for i in range(logits.shape[0])])
                 actual_sents.extend(self.vocab.batch_decode(valid_dict['tgt_output'].tolist()))
+
+                if self.config.pl_params.use_beamsearch:
+                    beam_results, beam_scores, timesteps, out_lens = self.ctc_decoder.decode(
+                        valid_dict['logits'].softmax(2))
+
+                    for i in range(beam_results.size(0)):
+                        pred_sent = self.convert_to_string(beam_results[i][0], out_lens[i][0])
+                        pred_sents.append(pred_sent.replace('<pad>', ''))
+                else:
+                    logits = valid_dict['logits'].cpu().detach().numpy()
+                    pred_sents.extend([self._greedy_decode(logits[i]) for i in range(logits.shape[0])])
 
         avg_sent_acc = metrics(actual_sents, pred_sents, type='accuracy')
         acc_per_char = metrics(actual_sents, pred_sents, type='char_acc')
@@ -209,12 +214,14 @@ class TransformerOCRCTC:
                     "character accuracy": acc_per_char * 100,
                     "normalized edit distance": normalized_ed * 100}
 
+        logging.info(val_info)
+
         self.model.train()
         return val_info
 
     def validation_step(self, batch):
-        img = batch['img']
-        tgt_output = batch['tgt_output']
+        img = batch['img'].cuda(non_blocking=True)
+        tgt_output = batch['tgt_output'].cuda(non_blocking=True)
 
         logits = self.model(img)
         logits = F.log_softmax(logits, dim=2)
@@ -313,6 +320,9 @@ class TransformerOCRCTC:
 
         return loss_mean
 
+    def convert_to_string(self, tokens, seq_len):
+        return "".join([self.vocab.get_vocab_tokens()[x] for x in tokens[0:seq_len]])
+
     def load_weights(self, filename):
         state_dict = torch.load(filename, map_location=torch.device('cuda:0'))
 
@@ -320,7 +330,7 @@ class TransformerOCRCTC:
         new_state_dict = {}
         for name, param in state_dict.items():
             if name.startswith('module'):
-                name = name[:7]
+                name = name[7:]
 
             new_state_dict[name] = param
 

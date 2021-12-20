@@ -1,0 +1,9 @@
+model_path:
+alpha: 0.0
+beta: 0.0
+cutoff_top_n: 40
+cutoff_prob: 1.0
+beam_width: 10
+num_processes: 4
+blank_id: 1
+log_probs_input: False
