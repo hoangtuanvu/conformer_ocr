@@ -26,6 +26,7 @@ ctc_smoothing: 0.1
 max_norm: 5.0
 pretrained:
 use_beamsearch: True
+predict: False
 
 model_callbacks:
   monitor: sentence accuracy

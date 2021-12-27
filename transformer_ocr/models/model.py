@@ -8,14 +8,16 @@ from torch.optim import Adam
 from torch import nn
 import torch.nn.functional as F
 from torch.utils.data import DataLoader
+import torchvision.transforms as transforms
 from omegaconf import DictConfig, ListConfig
 from ctcdecode import CTCBeamDecoder
 
+from transformer_ocr.core.optimizers import NaiveScheduler
 from transformer_ocr.utils.vocab import VocabBuilder
 from transformer_ocr.utils.dataset import OCRDataset, ClusterRandomSampler, Collator
-from transformer_ocr.core.optimizers import NaiveScheduler
 from transformer_ocr.utils.augment import ImgAugTransform
 from transformer_ocr.utils.metrics import metrics
+from transformer_ocr.utils.image_processing import resize_img
 from transformer_ocr.models.cnn_extraction.feature_extraction import FeatureExtraction
 from transformer_ocr.models.transformers.conformer import ConformerEncoder
 from transformer_ocr.models.transformers.tr_encoder import TransformerEncoder
@@ -80,18 +82,6 @@ class TransformerOCRCTC:
 
         self.batch_size = config.model.batch_size
 
-        self.optimizer = NaiveScheduler(Adam(self.model.parameters(),
-                                             lr=config.optimizer.optimizer.lr,
-                                             betas=tuple(config.optimizer.optimizer.betas),
-                                             eps=config.optimizer.optimizer.eps), 2.0,
-                                        config.model.transformer_args.d_model,
-                                        config.optimizer.optimizer.n_warm_steps)
-
-        self.train_data = self.train_dataloader()
-        self.valid_data = self.val_dataloader()
-
-        self.criterion = nn.CTCLoss(**self.config.pl_params.loss_func)
-
         self.ctc_decoder = CTCBeamDecoder(
             self.vocab.get_vocab_tokens(),
             **self.config.lm_models
@@ -102,7 +92,24 @@ class TransformerOCRCTC:
                 logging.error('{} not exists. Please verify this!'.format(self.config.pl_params.pretrained))
                 exit(0)
 
+            logging.info("Start loading pre-trained weights from {}".format(self.config.pl_params.pretrained))
             self.load_weights(self.config.pl_params.pretrained)
+
+        if not self.config.pl_params.predict:
+            self.optimizer = NaiveScheduler(Adam(self.model.parameters(),
+                                                 lr=config.optimizer.optimizer.lr,
+                                                 betas=tuple(config.optimizer.optimizer.betas),
+                                                 eps=config.optimizer.optimizer.eps), 2.0,
+                                            config.model.transformer_args.d_model,
+                                            config.optimizer.optimizer.n_warm_steps)
+
+            logging.info("Start training ...")
+            self.train_data = self.train_dataloader()
+            self.valid_data = self.val_dataloader()
+
+            self.criterion = nn.CTCLoss(**self.config.pl_params.loss_func)
+        else:
+            logging.info('Start predicting ...')
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         return self.model(x)
@@ -247,6 +254,26 @@ class TransformerOCRCTC:
             'tgt_output': tgt_output
         }
 
+    def predict(self, img):
+        resized_img = resize_img(img, self.config.dataset.dataset.unchanged.img_height,
+                                 self.config.dataset.dataset.unchanged.img_width_min,
+                                 self.config.dataset.dataset.unchanged.img_width_max)
+
+        img = transforms.ToTensor()(resized_img).unsqueeze(0).to(self.device)
+        img = img / 255
+
+        logits = self.model(img)
+        logits = F.log_softmax(logits, dim=2)
+
+        if self.config.pl_params.use_beamsearch:
+            beam_results, beam_scores, timesteps, out_lens = self.ctc_decoder.decode(logits.softmax(2))
+            pred_sent = self.convert_to_string(beam_results[0][0], out_lens[0][0])
+        else:
+            logits = logits.cpu().detach().numpy()
+            pred_sent = self._greedy_decode(logits[0])
+
+        return pred_sent
+
     @property
     def transform(self):
         if not self.config.dataset.aug.image_aug:
@@ -312,25 +339,6 @@ class TransformerOCRCTC:
 
         torch.save(self.model.state_dict(), filename)
 
-    @staticmethod
-    def kldiv_lsm_ctc(logits: torch.Tensor, ylens: torch.Tensor) -> torch.Tensor:
-        """Compute KL divergence loss for label smoothing of CTC and Transducer models.
-        Args:
-            logits (FloatTensor): `[B, T, vocab]`
-            ylens (IntTensor): `[B]`
-        Returns:
-            loss_mean (FloatTensor): `[1]`
-        """
-        bs, _, vocab = logits.size()
-
-        log_uniform = logits.new_zeros(logits.size()).fill_(math.log(1 / (vocab - 1)))
-        probs = torch.softmax(logits, dim=-1)
-        log_probs = torch.log_softmax(logits, dim=-1)
-        loss = torch.mul(probs, log_probs - log_uniform)
-        loss_mean = sum([loss[b, :ylens[b], :].sum() for b in range(bs)]) / ylens.sum()
-
-        return loss_mean
-
     def convert_to_string(self, tokens, seq_len):
         return "".join([self.vocab.get_vocab_tokens()[x] for x in tokens[0:seq_len]])
 
@@ -354,7 +362,26 @@ class TransformerOCRCTC:
                                                                               new_state_dict[name].shape))
                 del new_state_dict[name]
 
-        self.model.load_state_dict(new_state_dict, strict=False)
+        self.model.load_state_dict(new_state_dict, strict=True)
+
+    @staticmethod
+    def kldiv_lsm_ctc(logits: torch.Tensor, ylens: torch.Tensor) -> torch.Tensor:
+        """Compute KL divergence loss for label smoothing of CTC and Transducer models.
+        Args:
+            logits (FloatTensor): `[B, T, vocab]`
+            ylens (IntTensor): `[B]`
+        Returns:
+            loss_mean (FloatTensor): `[1]`
+        """
+        bs, _, vocab = logits.size()
+
+        log_uniform = logits.new_zeros(logits.size()).fill_(math.log(1 / (vocab - 1)))
+        probs = torch.softmax(logits, dim=-1)
+        log_probs = torch.log_softmax(logits, dim=-1)
+        loss = torch.mul(probs, log_probs - log_uniform)
+        loss_mean = sum([loss[b, :ylens[b], :].sum() for b in range(bs)]) / ylens.sum()
+
+        return loss_mean
 
     @staticmethod
     def get_devices(device):
