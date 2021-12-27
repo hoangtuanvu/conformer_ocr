@@ -3,12 +3,12 @@ import time
 import numpy as np
 import torch
 import math
+import logging
 from torch.optim import Adam
 from torch import nn
 import torch.nn.functional as F
 from torch.utils.data import DataLoader
-from omegaconf import DictConfig
-import logging
+from omegaconf import DictConfig, ListConfig
 from ctcdecode import CTCBeamDecoder
 
 from transformer_ocr.utils.vocab import VocabBuilder
@@ -63,8 +63,20 @@ class TransformerOCRCTC:
                                     transformer_type=config.model.transformer_type,
                                     transformer_args=config.model.transformer_args)
 
-        self.model = self.model.to('cuda:0')
-        self.model = nn.DataParallel(self.model, device_ids=[0, 1])
+        device = self.get_devices(self.config.pl_params.pl_trainer.gpus)
+
+        if isinstance(device, int):
+            logging.info("It's running on GPU {}".format(device))
+            self.device = 'cuda:{}'.format(device)
+            self.model = self.model.to(self.device)
+        elif isinstance(device, list):
+            logging.info("It's running on multi-GPUs {}".format(device))
+            self.device = 'cuda:{}'.format(device[0])
+            self.model = self.model.to('cuda:{}'.format(device[0]))
+            self.model = nn.DataParallel(self.model, device_ids=device)
+        else:
+            self.device = device
+            self.model = self.model.to(self.device)
 
         self.batch_size = config.model.batch_size
 
@@ -96,8 +108,8 @@ class TransformerOCRCTC:
         return self.model(x)
 
     def training_step(self, batch, step):
-        img = batch['img'].cuda(non_blocking=True)
-        tgt_output = batch['tgt_output'].cuda(non_blocking=True)
+        img = batch['img'].cuda(non_blocking=True, device=self.device)
+        tgt_output = batch['tgt_output'].cuda(non_blocking=True, device=self.device)
 
         outputs = self.model(img)
         outputs = F.log_softmax(outputs, dim=2)
@@ -219,8 +231,8 @@ class TransformerOCRCTC:
         return val_info
 
     def validation_step(self, batch):
-        img = batch['img'].cuda(non_blocking=True)
-        tgt_output = batch['tgt_output'].cuda(non_blocking=True)
+        img = batch['img'].cuda(non_blocking=True, device=self.device)
+        tgt_output = batch['tgt_output'].cuda(non_blocking=True, device=self.device)
 
         logits = self.model(img)
         logits = F.log_softmax(logits, dim=2)
@@ -323,7 +335,7 @@ class TransformerOCRCTC:
         return "".join([self.vocab.get_vocab_tokens()[x] for x in tokens[0:seq_len]])
 
     def load_weights(self, filename):
-        state_dict = torch.load(filename, map_location=torch.device('cuda:0'))
+        state_dict = torch.load(filename, map_location=torch.device(self.device))
 
         # Multi-gpus
         new_state_dict = {}
@@ -343,4 +355,19 @@ class TransformerOCRCTC:
                 del new_state_dict[name]
 
         self.model.load_state_dict(new_state_dict, strict=False)
+
+    @staticmethod
+    def get_devices(device):
+        if isinstance(device, int):
+            _device = device
+        elif isinstance(device, ListConfig):
+            _device = list(device)
+        else:
+            raise Exception("Please fill list of integers or single values. For example, gpus: [0, 1] or gpus: 0")
+
+        if not torch.cuda.is_available():
+            logging.info("It's running on CPU!")
+            _device = 'cpu'
+
+        return _device
 

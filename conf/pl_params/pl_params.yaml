@@ -1,5 +1,5 @@
 pl_trainer:
-  gpus: 2 # number of gpus
+  gpus: [0, 1]
   max_epochs: 200
   max_steps: 100000 # computed at runtime if not set
   num_nodes: 1
