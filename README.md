@@ -8,7 +8,7 @@ This is also the first repo to utilize ConformerNet (https://arxiv.org/abs/2005.
 ## Architecture
 
 <p align="center">
-<img src="https://raw.githubusercontent.com/hoangtuanvu/conformer_ocr/master/visualization/architecture.png" width="512" height="614">
+<img src="https://github.com/hoangtuanvu/conformer_ocr/blob/main/visualization/architecture.png" width="512" height="614">
 </p>
 
 ## Key Features
