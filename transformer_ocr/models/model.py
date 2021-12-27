@@ -70,8 +70,7 @@ class TransformerOCRCTC:
 
         self.optimizer = NaiveScheduler(Adam(self.model.parameters(),
                                              lr=config.optimizer.optimizer.lr,
-                                             betas=(config.optimizer.optimizer.betas_0,
-                                                    config.optimizer.optimizer.betas_1),
+                                             betas=tuple(config.optimizer.optimizer.betas),
                                              eps=config.optimizer.optimizer.eps), 2.0,
                                         config.model.transformer_args.d_model,
                                         config.optimizer.optimizer.n_warm_steps)
